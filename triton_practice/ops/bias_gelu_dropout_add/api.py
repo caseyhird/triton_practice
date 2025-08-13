@@ -1,4 +1,3 @@
-import torch
 from .eager import forward as eager_forward
 from .triton_kernel import triton_forward
 from ...compile.inductor import compiled

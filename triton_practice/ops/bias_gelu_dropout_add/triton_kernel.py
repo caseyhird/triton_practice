@@ -2,6 +2,15 @@ import torch
 import triton
 import triton.language as tl
 
+CONFIGS = [
+    triton.Config({"BLOCK_M": 64, "BLOCK_N": 128}, num_warps=4, num_stages=2),
+    triton.Config({"BLOCK_M": 64, "BLOCK_N": 256}, num_warps=8, num_stages=2),
+    triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=8, num_stages=2),
+    triton.Config({"BLOCK_M": 128, "BLOCK_N": 256}, num_warps=8, num_stages=3),
+    triton.Config({"BLOCK_M": 32, "BLOCK_N": 256}, num_warps=4, num_stages=2),
+    triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=2),
+]
+
 
 @triton.autotune(
     configs=CONFIGS,
@@ -50,9 +59,10 @@ def bias_gelu_dropout_residual_fwd(
     else:
         z = x
 
-    # GELU (tanh approximation)
-    c = 0.7978845608 * (z + 0.044715 * z * z * z)
-    g = 0.5 * z * (1.0 + tl.tanh(c))
+    # GELU tanh approximation, with tanh(x) = 2 * sigmoid(2x) - 1 (see README for details)
+    sqrt_2_over_pi = 0.7978845608
+    c = sqrt_2_over_pi * (z + 0.044715 * z * z * z)
+    g = z * (tl.sigmoid(2.0 * c))
 
     # Dropout (inverted) only if training and p>0
     if training:
@@ -70,37 +80,37 @@ def bias_gelu_dropout_residual_fwd(
     tl.store(y_ptr + mm * stride_ym + nn * stride_yn, out, mask=mask)
 
 
-def forward(
+def triton_forward(
     x: torch.Tensor,
     bias: torch.Tensor | None,
     residual: torch.Tensor,
     p: float = 0.0,
     training: bool = True,
-    *,
-    block_m=64,
-    block_n=128,
-    num_warps=4,
-    num_stages=2,
     seed: int | None = None,
 ):
     """ """
-    assert x.ndim == 2 and residual.shape == x.shape
-    if bias is not None:
-        assert bias.ndim == 1 and bias.shape[0] == x.shape[1]
+    assert residual.shape == x.shape
 
-    M, N = x.shape
-    # Work in fp32 for math; cast IO around the kernel
-    x32 = x.to(torch.float32)
-    r32 = residual.to(torch.float32)
+    # ---- normalize shapes to [M, N] with N = last dim ----
+    N = x.shape[-1]
+    M = x.numel() // N
+    if bias is not None:
+        assert bias.ndim == 1 and bias.shape[0] == N
+
+    # reshape (view if possible, else copy). make last-dim contiguous for fast kernel
+    x2 = x.reshape(M, N).contiguous()
+    r2 = residual.reshape(M, N).contiguous()
+
+    x32 = x2.to(torch.float32)
+    r32 = r2.to(torch.float32)
     b32 = (
-        bias.to(torch.float32)
+        bias.to(torch.float32).contiguous()
         if bias is not None
         else torch.empty(1, dtype=torch.float32, device=x.device)
     )
-    y32 = torch.empty_like(x32)
+    y32 = torch.empty_like(x32, dtype=torch.float32)
 
     if seed is None:
-        # make it reproducible if you pass a specific seed
         seed = torch.randint(0, 2**31 - 1, (), device=x.device).item()
 
     grid = lambda META: (
@@ -108,6 +118,7 @@ def forward(
         triton.cdiv(N, META["BLOCK_N"]),
     )
 
+    # actual kernel launch
     bias_gelu_dropout_residual_fwd[grid](
         x32,
         b32,
@@ -124,7 +135,9 @@ def forward(
         (b32.stride(0) if bias is not None else 0),
         float(p),
         seed,
-        training and p > 0.0,
+        training and p > 0.0,  # no dropout during inference
         bias is not None,
     )
-    return y32.to(x.dtype)
+
+    # convert to original shape & dtype
+    return y32.to(x.dtype).reshape(x.shape)
