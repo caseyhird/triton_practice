@@ -85,7 +85,6 @@ def run_point(B, S, H, dtype, p, device, repeats):
     return results
 
 
-# uv run python -m triton_practice.ops.bias_gelu_dropout_add.sweep
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="cuda")
@@ -177,6 +176,6 @@ def main():
             indent=2,
         )
 
-
+# uv run python -m triton_practice.ops.bias_gelu_dropout_add.sweep
 if __name__ == "__main__":
     main()
