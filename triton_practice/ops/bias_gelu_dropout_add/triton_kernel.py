@@ -65,7 +65,7 @@ def bias_gelu_dropout_residual_fwd(
     g = z * (tl.sigmoid(2.0 * c))
 
     # Dropout (inverted) only if training and p>0
-    if training:
+    if training and p > 0.0:
         # logical linear index i*N + j → layout-agnostic deterministic mask
         linear_idx = (mm * N + nn).to(tl.int32)
         r = tl.rand(seed, linear_idx)
@@ -135,7 +135,7 @@ def triton_forward(
         (b32.stride(0) if bias is not None else 0),
         float(p),
         seed,
-        training and p > 0.0,  # no dropout during inference
+        training,
         bias is not None,
     )
 

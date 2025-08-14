@@ -1,12 +1,9 @@
-# triton_practice/ops/bias_gelu_dropout_add/tests.py
-
 import torch
 import pytest
 import numpy as np
 from .api import forward
 from ...utils.check import assert_allclose
 
-# We can run these on CPU for eager, but Triton requires CUDA
 cuda_available = torch.cuda.is_available()
 
 
