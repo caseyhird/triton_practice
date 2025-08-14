@@ -69,8 +69,11 @@ def run_point(B, S, H, dtype, p, device, repeats):
     def ft():
         forward(x, bias, res, p, backend="triton")
 
+    # run torch.compile once here so it doesn't run during the benchmark
+    fc_compiled = torch.compile(lambda *args: forward(*args, backend="eager"))
+
     def fc():
-        forward(x, bias, res, p, backend="compiled")
+        fc_compiled(x, bias, res, p)
 
     results = {}
     for name, fn in [("eager", fe), ("triton", ft), ("compiled", fc)]:
@@ -175,6 +178,7 @@ def main():
             f,
             indent=2,
         )
+
 
 # uv run python -m triton_practice.ops.bias_gelu_dropout_add.sweep
 if __name__ == "__main__":

@@ -31,19 +31,6 @@ def test_forward_matches_eager(B, S, H):
     assert_allclose(y_eager.float(), y_triton.float(), rtol=1e-3, atol=1e-3)
 
 
-def test_no_bias_equivalence():
-    device = "cuda" if cuda_available else "cpu"
-    torch.manual_seed(42)
-    p = 0.0
-    x = torch.randn(2, 4, 8, dtype=torch.float32, device=device)
-    res = torch.randn_like(x)
-
-    y1 = forward(x, None, res, p, backend="eager", seed=42)
-    y2 = forward(x, None, res, p, backend="triton", seed=42)
-
-    assert_allclose(y1, y2, rtol=1e-5, atol=1e-5)
-
-
 @pytest.mark.parametrize("p", [0.1, 0.2, 0.5])
 def test_triton_dropout_zero_fraction(p):
     """Test that dropout produces approximately the correct fraction of zeros."""

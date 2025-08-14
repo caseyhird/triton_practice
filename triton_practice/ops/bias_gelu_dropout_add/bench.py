@@ -40,7 +40,10 @@ def main():
         forward(x, bias, res, p, backend="triton")
 
     # run torch.compile once here so it doesn't run during the benchmark
-    fc = forward(x, bias, res, p, backend="compiled")
+    fc_compiled = torch.compile(lambda *args: forward(*args, backend="eager"))
+
+    def fc():
+        fc_compiled(x, bias, res, p)
 
     te = run_bench(fe)
     tt = run_bench(ft)
